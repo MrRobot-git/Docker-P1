@@ -1,0 +1,94 @@
+services:
+  mysql:
+    image: mysql:${MYSQL_VERSION}
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - backend-network
+    healthcheck:
+      # 127.0.0.1 (TCP) solo responde cuando arranca el servidor definitivo,
+      # no el temporal de inicialización que solo escucha por socket
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  wordpress:
+    image: ${WORDPRESS_IMAGE}
+    restart: unless-stopped
+    environment:
+      WORDPRESS_DATABASE_HOST: mysql
+      WORDPRESS_DATABASE_PORT_NUMBER: 3306
+      WORDPRESS_DATABASE_NAME: ${MYSQL_DATABASE}
+      WORDPRESS_DATABASE_USER: ${MYSQL_USER}
+      WORDPRESS_DATABASE_PASSWORD: ${MYSQL_PASSWORD}
+      WORDPRESS_USERNAME: ${WORDPRESS_USERNAME}
+      WORDPRESS_PASSWORD: ${WORDPRESS_PASSWORD}
+      WORDPRESS_EMAIL: ${WORDPRESS_EMAIL}
+      WORDPRESS_BLOG_NAME: ${WORDPRESS_BLOG_NAME}
+      # URL pública (https + puerto); la aplica init/wp-https.sh
+      WORDPRESS_PUBLIC_URL: https://${PUBLIC_HOST}:${HTTPS_PORT}
+    volumes:
+      - wordpress_data:/bitnami/wordpress
+      - ./init/wp-https.sh:/docker-entrypoint-init.d/wp-https.sh:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - frontend-network
+      - backend-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:8080/wp-login.php || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 90s
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+    ports:
+      - "${PMA_PORT}:80"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - frontend-network
+      - backend-network
+
+  https-portal:
+    image: steveltn/https-portal:1
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT}:80"
+      - "${HTTPS_PORT}:443"
+    environment:
+      DOMAINS: "${PUBLIC_HOST} -> http://wordpress:8080 #local"
+      # HTTP -> HTTPS conservando el puerto público (por defecto redirigiría al 443)
+      CUSTOM_NGINX_SERVER_PLAIN_CONFIG_BLOCK: "location ~ ^/ { return 301 https://${PUBLIC_HOST}:${HTTPS_PORT}$$request_uri; }"
+    volumes:
+      - ssl_certs_data:/var/lib/https-portal
+    depends_on:
+      wordpress:
+        condition: service_healthy
+    networks:
+      - frontend-network
+
+volumes:
+  mysql_data:
+  wordpress_data:
+  ssl_certs_data:
+
+networks:
+  frontend-network:
+  backend-network:
