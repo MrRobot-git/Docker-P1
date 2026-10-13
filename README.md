@@ -4,11 +4,22 @@ Tres proyectos Docker Compose independientes que pueden estar levantados a la ve
 
 | Proyecto | Servicios | URLs |
 |---|---|---|
-| `1-wordpress/` | WordPress (Bitnami) + MySQL + phpMyAdmin + https-portal | https://localhost:8443 · http://localhost:8081 (redirige a HTTPS) · phpMyAdmin http://localhost:8082 |
-| `2-prestashop/` | PrestaShop (oficial) + MySQL + phpMyAdmin + https-portal | https://localhost:9443 · http://localhost:8091 (redirige a HTTPS) · phpMyAdmin http://localhost:8092 |
-| `3-web-node/` | Nginx + Node.js + MySQL | http://localhost:8100 |
+| `1-wordpress/` | WordPress (Bitnami) + MySQL + phpMyAdmin + https-portal | https://wordpress.local:8443 · http://wordpress.local:8081 (redirige a HTTPS) · phpMyAdmin http://localhost:8082 |
+| `2-prestashop/` | PrestaShop (oficial) + MySQL + phpMyAdmin + https-portal | https://prestashop.local:9443 · http://prestashop.local:8091 (redirige a HTTPS) · phpMyAdmin http://localhost:8092 |
+| `3-web-node/` | Nginx + Node.js + MySQL | http://web.local:8100 |
 
 El certificado HTTPS es autofirmado (modo `local` de https-portal): el navegador avisará; con curl usar `-k`.
+
+## Nombres de dominio (una vez)
+
+Los dominios `wordpress.local`, `prestashop.local` y `web.local` apuntan a tu propia máquina. Añade a `/etc/hosts` (Linux/WSL):
+
+```
+127.0.0.1 wordpress.local prestashop.local web.local
+```
+Si usas el navegador de Windows (WSL), añade la misma línea en `C:\Windows\System32\drivers\etc\hosts` (como administrador).
+Sin tocar hosts también se puede probar con curl: `curl -k --resolve wordpress.local:8443:127.0.0.1 https://wordpress.local:8443/`.
+El dominio se cambia con `PUBLIC_HOST` (proyectos 1 y 2) o `NGINX_HOST` (proyecto 3) en el `.env`.
 
 ## Preparación (una vez por proyecto)
 
@@ -61,8 +72,8 @@ PrestaShop tarda unos 2-3 minutos en el primer arranque (instalación automátic
 - **restart: unless-stopped** en todos los servicios: se reinician tras un fallo o reinicio del host, pero no si los paras a mano.
 - **Puertos**: solo se publican https-portal (HTTP/HTTPS), phpMyAdmin y nginx; todos configurables desde `.env` y distintos entre proyectos.
 - **Variables**: todo en `.env` (el compose solo usa `${...}`).
-- **URL con puerto**: https-portal reenvía `Host` sin puerto y redirige HTTP→`https://localhost` (puerto 443), lo que rompe WordPress/PrestaShop con puertos no estándar (bucle de redirecciones). Soluciones:
+- **URL con puerto**: https-portal reenvía `Host` sin puerto y redirige HTTP→`https://<dominio>` (puerto 443), lo que rompe WordPress/PrestaShop con puertos no estándar (bucle de redirecciones). Soluciones:
   - redirección HTTP→HTTPS propia con el puerto correcto (`CUSTOM_NGINX_SERVER_PLAIN_CONFIG_BLOCK`);
-  - WordPress: `init/wp-https.sh` fija `WP_HOME`/`WP_SITEURL` a `https://localhost:8443`, `HTTP_HOST` con puerto y detecta HTTPS por `X-Forwarded-Proto`;
-  - PrestaShop: `PS_DOMAIN=localhost:9443` + `php/fix-host.php` (`auto_prepend_file`) que fija el host con puerto y HTTPS.
-- **Proyecto 3**: `mysql-init/init.sql` (montado en `/docker-entrypoint-initdb.d`) crea la tabla `productos` con datos; el contenedor `node` (Express + mysql2, Dockerfile propio) la consulta y nginx hace de proxy inverso.
+  - WordPress: `init/wp-https.sh` fija `WP_HOME`/`WP_SITEURL` a `https://wordpress.local:8443`, `HTTP_HOST` con puerto y detecta HTTPS por `X-Forwarded-Proto`;
+  - PrestaShop: `PS_DOMAIN=prestashop.local:9443` + `php/fix-host.php` (`auto_prepend_file`) que fija el host con puerto y HTTPS.
+- **Proyecto 3**: `mysql-init/init.sql` (montado en `/docker-entrypoint-initdb.d`) crea la tabla `productos` con datos; el contenedor `node` (Express + mysql2, Dockerfile propio) la consulta y nginx hace de proxy inverso y responde al dominio `NGINX_HOST` (plantilla `nginx/default.conf.template`).
