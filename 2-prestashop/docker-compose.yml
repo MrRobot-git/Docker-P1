@@ -1,0 +1,99 @@
+services:
+  mysql:
+    image: mysql:${MYSQL_VERSION}
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - backend-network
+    healthcheck:
+      # 127.0.0.1 (TCP) solo responde cuando arranca el servidor definitivo,
+      # no el temporal de inicialización que solo escucha por socket
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  prestashop:
+    image: ${PRESTASHOP_IMAGE}
+    restart: unless-stopped
+    environment:
+      PS_INSTALL_AUTO: 1
+      DB_SERVER: mysql
+      DB_NAME: ${MYSQL_DATABASE}
+      DB_USER: ${MYSQL_USER}
+      DB_PASSWD: ${MYSQL_PASSWORD}
+      # Dominio público con puerto: PrestaShop lo guarda en la BD
+      PS_DOMAIN: ${PUBLIC_HOST}:${HTTPS_PORT}
+      PS_ENABLE_SSL: 1
+      PS_FOLDER_INSTALL: ${PS_FOLDER_INSTALL}
+      PS_FOLDER_ADMIN: ${PS_FOLDER_ADMIN}
+      PS_COUNTRY: ${PS_COUNTRY}
+      PS_LANGUAGE: ${PS_LANGUAGE}
+      ADMIN_MAIL: ${ADMIN_MAIL}
+      ADMIN_PASSWD: ${ADMIN_PASSWD}
+    volumes:
+      - prestashop_data:/var/www/html
+      - ./php/fix-host.php:/usr/local/etc/php/fix-host.php:ro
+      - ./php/fix-host.ini:/usr/local/etc/php/conf.d/zz-fix-host.ini:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - frontend-network
+      - backend-network
+    healthcheck:
+      # La instalación automática tarda unos minutos
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+    ports:
+      - "${PMA_PORT}:80"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - frontend-network
+      - backend-network
+
+  https-portal:
+    image: steveltn/https-portal:1
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT}:80"
+      - "${HTTPS_PORT}:443"
+    environment:
+      DOMAINS: "${PUBLIC_HOST} -> http://prestashop:80 #local"
+      # HTTP -> HTTPS conservando el puerto público (por defecto redirigiría al 443)
+      CUSTOM_NGINX_SERVER_PLAIN_CONFIG_BLOCK: "location ~ ^/ { return 301 https://${PUBLIC_HOST}:${HTTPS_PORT}$$request_uri; }"
+    volumes:
+      - ssl_certs_data:/var/lib/https-portal
+    depends_on:
+      prestashop:
+        condition: service_healthy
+    networks:
+      - frontend-network
+
+volumes:
+  mysql_data:
+  prestashop_data:
+  ssl_certs_data:
+
+networks:
+  frontend-network:
+  backend-network:
